@@ -30,7 +30,18 @@ COPY --link app/package.json ./
 RUN --mount=type=cache,target=/app/node_modules/.vite \
     bun run build
 
-# Stage 3: Runtime
+# Stage 3: Test
+FROM oven/bun:1 AS test
+WORKDIR /app
+COPY --link --from=deps /app/node_modules ./node_modules
+COPY --link app/tsconfig.json app/vite.config.ts app/vitest.config.ts app/react-router.config.ts ./
+COPY --link app/src ./src
+COPY --link app/public ./public
+COPY --link app/test ./test
+COPY --link app/package.json ./
+RUN bun run test
+
+# Stage 4: Runtime
 FROM oven/bun:1-slim AS runtime
 WORKDIR /app
 COPY --link --from=build /app/build ./build

@@ -1,0 +1,158 @@
+import { cn } from "~/lib/cn";
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef } from "react";
+import { ResponsiveContainer, Tooltip, Legend } from "recharts";
+import { motion, AnimatePresence } from "framer-motion";
+import type { undefinedProps } from "./undefined";
+import type { undefinedProps } from "./undefined";
+
+// ─── Types ───
+
+export type MultiAxisChartVariant = "default" | "primary" | "secondary" | "destructive" | "outline";
+export type MultiAxisChartSize = "xs" | "sm" | "md" | "lg" | "xl";
+
+export interface MultiAxisChartProps {
+  className?: string;
+  children?: React.ReactNode;
+  variant?: MultiAxisChartVariant;
+  size?: MultiAxisChartSize;
+  disabled?: boolean;
+  loading?: boolean;
+  id?: string;
+  testId?: string;
+  data?: { name: string; value: number; category?: string }[];
+  xKey?: string;
+  yKey?: string;
+  color?: string;
+  showGrid?: boolean;
+  showTooltip?: boolean;
+  showLegend?: boolean;
+  animate?: boolean;
+  height?: number;
+  formatValue?: (value: number) => string;
+  onClick?: (event: React.MouseEvent) => void;
+  onKeyDown?: (event: React.KeyboardEvent) => void;
+  "aria-label"?: string;
+  "aria-describedby"?: string;
+  role?: string;
+  tabIndex?: number;
+}
+
+// ─── Component ───
+
+export const MultiAxisChart = forwardRef<HTMLDivElement, MultiAxisChartProps>(function MultiAxisChart(
+  { className, children, variant = "default", size = "md", disabled = false, loading = false, id, testId, onClick, onKeyDown, ...props },
+  ref
+) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isActive, setIsActive] = useState(false);
+  const [internalState, setInternalState] = useState<Record<string, unknown>>({});
+  const mountedRef = useRef(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (disabled || loading) return;
+    setIsActive(true);
+    timerRef.current = setTimeout(() => mountedRef.current && setIsActive(false), 150);
+    onClick?.(e);
+  }, [disabled, loading, onClick]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick(e as unknown as React.MouseEvent);
+    }
+    onKeyDown?.(e);
+  }, [handleClick, onKeyDown]);
+
+  const computedClassName = useMemo(() => {
+    const baseClasses = [
+      "multi-axis-chart",
+      `variant-${variant}`,
+      `size-${size}`,
+      isHovered && "is-hovered",
+      isFocused && "is-focused",
+      isActive && "is-active",
+      disabled && "is-disabled",
+      loading && "is-loading",
+    ].filter(Boolean);
+    return cn(...baseClasses, className);
+  }, [variant, size, isHovered, isFocused, isActive, disabled, loading, className]);
+
+  const chartData = useMemo(() => {
+    const raw = (props as MultiAxisChartProps).data ?? [];
+    return raw.map((d, i) => ({
+      ...d,
+      _color: d.category ? `hsl(${(i * 360) / raw.length}, 70%, 50%)` : (props as MultiAxisChartProps).color ?? "#3b82f6",
+    }));
+  }, [(props as MultiAxisChartProps).data, (props as MultiAxisChartProps).color]);
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      data-testid={testId ?? "MultiAxisChart"}
+      className={computedClassName}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => { setIsHovered(false); setIsActive(false); }}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      role={props.role ?? "button"}
+      tabIndex={props.tabIndex ?? (disabled ? -1 : 0)}
+      aria-label={props["aria-label"]}
+      aria-describedby={props["aria-describedby"]}
+      aria-disabled={disabled}
+      aria-busy={loading}
+    >
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-900/80 rounded-inherit z-10">
+          <div className="animate-spin rounded-full h-5 w-5 border-2 border-current border-t-transparent" />
+        </div>
+      )}
+      <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+            <span className="text-white font-semibold text-sm">MU</span>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Multi Axis Chart</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Variant: {variant} &middot; Size: {size}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isHovered && <span className="text-xs text-blue-500">Hovered</span>}
+          {isFocused && <span className="text-xs text-green-500">Focused</span>}
+          {isActive && <span className="text-xs text-orange-500">Active</span>}
+        </div>
+      </div>
+      <div className="p-4 space-y-4">
+        <div style={{ height: (props as MultiAxisChartProps).height ?? 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+              <span className="text-gray-400">Chart: {chartData.length} data points</span>
+            </div>
+          </ResponsiveContainer>
+        </div>
+        <div className="min-h-[2rem]">
+          {children}
+        </div>
+      </div>
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500">
+        <span>charts/MultiAxisChart</span>
+        <span>{new Date().toLocaleDateString()}</span>
+      </div>
+    </div>
+  );
+});
+
+export default MultiAxisChart;
