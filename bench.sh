@@ -271,7 +271,7 @@ EOF
 
 # --- Main ---
 
-ALL_VARIANTS=(baseline layered multistage cachemount registry combined distroless)
+ALL_VARIANTS=(baseline layered multistage cachemount registry combined distroless gha-optimized combined-distroless)
 ALL_SCENARIOS=(cold warm incremental deps)
 
 if [[ "$VARIANT" == "__all__" ]]; then

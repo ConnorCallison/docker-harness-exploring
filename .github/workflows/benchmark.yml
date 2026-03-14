@@ -7,22 +7,22 @@ on:
       - 'benchmarks/dockerfiles/**'
       - 'app/**'
       - 'bench.sh'
-  pull_request:
-    branches: [main]
+      - '.github/workflows/benchmark.yml'
   workflow_dispatch:
     inputs:
       variant:
         description: 'Dockerfile variant to benchmark'
         required: false
-        default: '__all__'
+        default: 'gha-optimized'
         type: choice
         options:
-          - __all__
+          - gha-optimized
+          - combined
+          - combined-distroless
           - baseline
           - layered
           - multistage
           - cachemount
-          - combined
           - distroless
       scenario:
         description: 'Benchmark scenario'
@@ -34,17 +34,128 @@ on:
           - warm
           - incremental
           - deps
-          - __all__
       runs:
         description: 'Number of runs per benchmark'
         required: false
         default: '3'
 
 jobs:
-  benchmark:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Direct docker build benchmarks using bench.sh
+  # Tests raw build times on GHA runners (ubuntu-latest)
+  # ─────────────────────────────────────────────────────────────
+  bench-raw:
+    name: "Raw build: ${{ github.event.inputs.variant || 'gha-optimized' }}"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+
+      - name: Run benchmarks
+        run: |
+          chmod +x bench.sh
+          VARIANT="${{ github.event.inputs.variant || 'gha-optimized' }}"
+          SCENARIO="${{ github.event.inputs.scenario || 'cold' }}"
+          RUNS="${{ github.event.inputs.runs || '3' }}"
+          ./bench.sh "$VARIANT" --scenario "$SCENARIO" --runs "$RUNS"
+
+      - name: Generate analysis report
+        run: bun run analysis/analyze.ts
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-raw-${{ github.sha }}
+          path: |
+            benchmarks/results/
+            analysis/REPORT.md
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: GHA Cache Backend — the main CI optimization test
+  # Uses --cache-to=type=gha and --cache-from=type=gha
+  # Run 1 = cold (populates cache), Run 2 = warm (hits cache)
+  # ─────────────────────────────────────────────────────────────
+  bench-gha-cache:
+    name: "GHA Cache Backend"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+
+      - name: "Build 1: Cold (populate GHA cache)"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: benchmarks/dockerfiles/gha-optimized.Dockerfile
+          push: false
+          tags: harness-bench-gha:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Build 2: Warm (from GHA cache, no changes)"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: benchmarks/dockerfiles/gha-optimized.Dockerfile
+          push: false
+          tags: harness-bench-gha:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Build 3: Incremental (touch one component, rebuild)"
+        run: echo "// CI incremental change: $(date +%s)" >> app/src/components/ui/Button.tsx
+
+      - name: "Build 3: Incremental build from GHA cache"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: benchmarks/dockerfiles/gha-optimized.Dockerfile
+          push: false
+          tags: harness-bench-gha:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report image size
+        run: |
+          echo "### Image Details" >> $GITHUB_STEP_SUMMARY
+          docker image ls harness-bench-gha --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Layer breakdown" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          docker history harness-bench-gha:latest --format "table {{.CreatedBy}}\t{{.Size}}" --no-trunc | head -20 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Cache Backend Comparison
+  # Compares: no-cache vs gha vs local vs inline
+  # ─────────────────────────────────────────────────────────────
+  bench-cache-backends:
+    name: "Cache backend: ${{ matrix.cache }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: [none, gha, local, inline]
 
     steps:
       - uses: actions/checkout@v4
@@ -56,57 +167,170 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Generate the app if not committed
-      - name: Generate app scaffold
-        run: bun run scripts/generate-app.ts
-
-      # Install app dependencies (needed for lockfile)
-      - name: Install dependencies
-        working-directory: app
-        run: bun install
-
-      - name: Run benchmarks
+      # Build 1: Cold
+      - name: "Cold build (${{ matrix.cache }} cache)"
+        id: cold
         run: |
-          chmod +x bench.sh
-          VARIANT="${{ github.event.inputs.variant || 'combined' }}"
-          SCENARIO="${{ github.event.inputs.scenario || 'cold' }}"
-          RUNS="${{ github.event.inputs.runs || '3' }}"
+          DOCKERFILE="benchmarks/dockerfiles/gha-optimized.Dockerfile"
+          TAG="harness-bench-${{ matrix.cache }}"
+          START=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
 
-          if [[ "$VARIANT" == "__all__" ]]; then
-            ./bench.sh --all --scenario "$SCENARIO" --runs "$RUNS"
-          elif [[ "$SCENARIO" == "__all__" ]]; then
-            ./bench.sh "$VARIANT" --all-scenarios --runs "$RUNS"
-          else
-            ./bench.sh "$VARIANT" --scenario "$SCENARIO" --runs "$RUNS"
-          fi
+          case "${{ matrix.cache }}" in
+            none)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load . 2>&1 | tail -5
+              ;;
+            gha)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=gha,scope=${{ matrix.cache }} \
+                --cache-to=type=gha,scope=${{ matrix.cache }},mode=max . 2>&1 | tail -5
+              ;;
+            local)
+              mkdir -p /tmp/buildcache
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=local,src=/tmp/buildcache \
+                --cache-to=type=local,dest=/tmp/buildcache,mode=max . 2>&1 | tail -5
+              ;;
+            inline)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-to=type=inline . 2>&1 | tail -5
+              ;;
+          esac
 
-      - name: Generate analysis report
-        run: bun run analysis/analyze.ts
+          END=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          COLD_TIME=$(echo "$END - $START" | bc | sed 's/^\./0./')
+          echo "cold_time=$COLD_TIME" >> $GITHUB_OUTPUT
+          echo "Cold build: ${COLD_TIME}s"
 
-      - name: Upload results
-        uses: actions/upload-artifact@v4
+      # Build 2: Warm (same code, should hit cache)
+      - name: "Warm build (${{ matrix.cache }} cache)"
+        id: warm
+        run: |
+          DOCKERFILE="benchmarks/dockerfiles/gha-optimized.Dockerfile"
+          TAG="harness-bench-${{ matrix.cache }}"
+          START=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+
+          case "${{ matrix.cache }}" in
+            none)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load . 2>&1 | tail -5
+              ;;
+            gha)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=gha,scope=${{ matrix.cache }} \
+                --cache-to=type=gha,scope=${{ matrix.cache }},mode=max . 2>&1 | tail -5
+              ;;
+            local)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=local,src=/tmp/buildcache \
+                --cache-to=type=local,dest=/tmp/buildcache,mode=max . 2>&1 | tail -5
+              ;;
+            inline)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-to=type=inline . 2>&1 | tail -5
+              ;;
+          esac
+
+          END=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          WARM_TIME=$(echo "$END - $START" | bc | sed 's/^\./0./')
+          echo "warm_time=$WARM_TIME" >> $GITHUB_OUTPUT
+          echo "Warm build: ${WARM_TIME}s"
+
+      # Build 3: Incremental (one file changed)
+      - name: Modify one component
+        run: echo "// CI change $(date +%s)" >> app/src/components/ui/Button.tsx
+
+      - name: "Incremental build (${{ matrix.cache }} cache)"
+        id: incremental
+        run: |
+          DOCKERFILE="benchmarks/dockerfiles/gha-optimized.Dockerfile"
+          TAG="harness-bench-${{ matrix.cache }}"
+          START=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+
+          case "${{ matrix.cache }}" in
+            none)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load . 2>&1 | tail -5
+              ;;
+            gha)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=gha,scope=${{ matrix.cache }} \
+                --cache-to=type=gha,scope=${{ matrix.cache }},mode=max . 2>&1 | tail -5
+              ;;
+            local)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-from=type=local,src=/tmp/buildcache \
+                --cache-to=type=local,dest=/tmp/buildcache,mode=max . 2>&1 | tail -5
+              ;;
+            inline)
+              docker buildx build -f "$DOCKERFILE" -t "$TAG" --load \
+                --cache-to=type=inline . 2>&1 | tail -5
+              ;;
+          esac
+
+          END=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          INCR_TIME=$(echo "$END - $START" | bc | sed 's/^\./0./')
+          echo "incr_time=$INCR_TIME" >> $GITHUB_OUTPUT
+          echo "Incremental build: ${INCR_TIME}s"
+
+      - name: Image size
+        id: size
+        run: |
+          SIZE=$(docker image inspect "harness-bench-${{ matrix.cache }}" --format='{{.Size}}' | awk '{printf "%.1f", $1/1048576}')
+          echo "image_size=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: Write summary
+        run: |
+          echo "## Cache Backend: ${{ matrix.cache }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scenario | Time |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cold | ${{ steps.cold.outputs.cold_time }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| Warm | ${{ steps.warm.outputs.warm_time }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| Incremental | ${{ steps.incremental.outputs.incr_time }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Size | ${{ steps.size.outputs.image_size }} MB |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4: Cross-run cache persistence test
+  # This job tests whether GHA cache persists between workflow runs
+  # (the whole point of type=gha for ephemeral runners)
+  # ─────────────────────────────────────────────────────────────
+  bench-cross-run:
+    name: "Cross-run cache test"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
         with:
-          name: benchmark-results-${{ github.sha }}
-          path: |
-            benchmarks/results/
-            analysis/REPORT.md
+          bun-version: latest
 
-      - name: Comment on PR with results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('analysis/REPORT.md', 'utf8');
-            // Extract just the results table and winners
-            const tableMatch = report.match(/## Results\n\n([\s\S]*?)\n\n## Winners\n\n([\s\S]*?)\n\n## Key/);
-            const summary = tableMatch
-              ? `## Docker Build Benchmark Results\n\n${tableMatch[1]}\n\n### Winners\n\n${tableMatch[2]}`
-              : '## Docker Build Benchmark\n\nSee full report in artifacts.';
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            });
+      - name: "Build with GHA cache (should be fast on 2nd+ workflow run)"
+        id: build
+        run: |
+          START=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+
+          docker buildx build \
+            -f benchmarks/dockerfiles/gha-optimized.Dockerfile \
+            -t harness-bench-crossrun \
+            --load \
+            --cache-from=type=gha,scope=crossrun \
+            --cache-to=type=gha,scope=crossrun,mode=max \
+            . 2>&1 | tail -10
+
+          END=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          BUILD_TIME=$(echo "$END - $START" | bc | sed 's/^\./0./')
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "Build time: ${BUILD_TIME}s"
+
+      - name: Write summary
+        run: |
+          echo "## Cross-Run Cache Persistence" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build time: **${{ steps.build.outputs.build_time }}s**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "If this is the first run, this is a cold build." >> $GITHUB_STEP_SUMMARY
+          echo "On subsequent runs, the GHA cache should make this significantly faster." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Trigger this workflow again to see the cache hit." >> $GITHUB_STEP_SUMMARY
