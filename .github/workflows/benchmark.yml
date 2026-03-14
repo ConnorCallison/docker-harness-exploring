@@ -34,16 +34,16 @@ on:
           - warm
           - incremental
           - deps
-      runs:
+      num_runs:
         description: 'Number of runs per benchmark'
         required: false
         default: '3'
 
 jobs:
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   # Job 1: Direct docker build benchmarks using bench.sh
   # Tests raw build times on GHA runners (ubuntu-latest)
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   bench-raw:
     name: "Raw build: ${{ github.event.inputs.variant || 'gha-optimized' }}"
     runs-on: ubuntu-latest
@@ -66,7 +66,7 @@ jobs:
           chmod +x bench.sh
           VARIANT="${{ github.event.inputs.variant || 'gha-optimized' }}"
           SCENARIO="${{ github.event.inputs.scenario || 'cold' }}"
-          RUNS="${{ github.event.inputs.runs || '3' }}"
+          RUNS="${{ github.event.inputs.num_runs || '3' }}"
           ./bench.sh "$VARIANT" --scenario "$SCENARIO" --runs "$RUNS"
 
       - name: Generate analysis report
@@ -80,11 +80,11 @@ jobs:
             benchmarks/results/
             analysis/REPORT.md
 
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   # Job 2: GHA Cache Backend — the main CI optimization test
   # Uses --cache-to=type=gha and --cache-from=type=gha
   # Run 1 = cold (populates cache), Run 2 = warm (hits cache)
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   bench-gha-cache:
     name: "GHA Cache Backend"
     runs-on: ubuntu-latest
@@ -145,10 +145,10 @@ jobs:
           docker history harness-bench-gha:latest --format "table {{.CreatedBy}}\t{{.Size}}" --no-trunc | head -20 >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   # Job 3: Cache Backend Comparison
   # Compares: no-cache vs gha vs local vs inline
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   bench-cache-backends:
     name: "Cache backend: ${{ matrix.cache }}"
     runs-on: ubuntu-latest
@@ -287,11 +287,11 @@ jobs:
           echo "| Incremental | ${{ steps.incremental.outputs.incr_time }}s |" >> $GITHUB_STEP_SUMMARY
           echo "| Image Size | ${{ steps.size.outputs.image_size }} MB |" >> $GITHUB_STEP_SUMMARY
 
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   # Job 4: Cross-run cache persistence test
   # This job tests whether GHA cache persists between workflow runs
   # (the whole point of type=gha for ephemeral runners)
-  # ─────────────────────────────────────────────────────────────
+  # -------------------------------------------------------------
   bench-cross-run:
     name: "Cross-run cache test"
     runs-on: ubuntu-latest
