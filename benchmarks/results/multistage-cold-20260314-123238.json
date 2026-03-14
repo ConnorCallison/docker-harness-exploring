@@ -1,0 +1,14 @@
+{
+  "variant": "multistage",
+  "scenario": "cold",
+  "timestamp": "2026-03-14T19:32:38Z",
+  "runs": [{"build_time_s": 23.101, "image_size_mb": 398.1, "layer_count": 10},{"build_time_s": 24.415, "image_size_mb": 398.1, "layer_count": 10},{"build_time_s": 18.751, "image_size_mb": 398.1, "layer_count": 10}],
+  "median_build_time_s": 18.751,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

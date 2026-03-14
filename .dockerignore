@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Benchmark infrastructure (not needed in build context)
+benchmarks/results
+analysis
+scripts
+.github
+
+# Documentation
+*.md
+!app/README.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node/Bun artifacts (already in app/)
+node_modules
+
+# Docker
+Dockerfile*
+docker-compose*

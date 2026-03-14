@@ -1,0 +1,40 @@
+{
+  "name": "docker-harness-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "start": "react-router-serve ./build/server/index.js",
+    "typecheck": "tsc",
+    "analyze": "bun run ../analysis/analyze.ts"
+  },
+  "dependencies": {
+    "@react-router/node": "^7.1.0",
+    "@react-router/serve": "^7.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^7.1.0",
+    "zod": "^3.24.0",
+    "date-fns": "^4.1.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.6.0",
+    "recharts": "^2.15.0",
+    "lucide-react": "^0.468.0",
+    "@tanstack/react-table": "^8.20.0",
+    "zustand": "^5.0.0",
+    "immer": "^10.1.0",
+    "nanoid": "^5.0.0",
+    "superjson": "^2.2.0"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-tsconfig-paths": "^4.3.0"
+  }
+}

@@ -1,0 +1,112 @@
+name: Docker Build Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'benchmarks/dockerfiles/**'
+      - 'app/**'
+      - 'bench.sh'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Dockerfile variant to benchmark'
+        required: false
+        default: '__all__'
+        type: choice
+        options:
+          - __all__
+          - baseline
+          - layered
+          - multistage
+          - cachemount
+          - combined
+          - distroless
+      scenario:
+        description: 'Benchmark scenario'
+        required: false
+        default: 'cold'
+        type: choice
+        options:
+          - cold
+          - warm
+          - incremental
+          - deps
+          - __all__
+      runs:
+        description: 'Number of runs per benchmark'
+        required: false
+        default: '3'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Generate the app if not committed
+      - name: Generate app scaffold
+        run: bun run scripts/generate-app.ts
+
+      # Install app dependencies (needed for lockfile)
+      - name: Install dependencies
+        working-directory: app
+        run: bun install
+
+      - name: Run benchmarks
+        run: |
+          chmod +x bench.sh
+          VARIANT="${{ github.event.inputs.variant || 'combined' }}"
+          SCENARIO="${{ github.event.inputs.scenario || 'cold' }}"
+          RUNS="${{ github.event.inputs.runs || '3' }}"
+
+          if [[ "$VARIANT" == "__all__" ]]; then
+            ./bench.sh --all --scenario "$SCENARIO" --runs "$RUNS"
+          elif [[ "$SCENARIO" == "__all__" ]]; then
+            ./bench.sh "$VARIANT" --all-scenarios --runs "$RUNS"
+          else
+            ./bench.sh "$VARIANT" --scenario "$SCENARIO" --runs "$RUNS"
+          fi
+
+      - name: Generate analysis report
+        run: bun run analysis/analyze.ts
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: |
+            benchmarks/results/
+            analysis/REPORT.md
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('analysis/REPORT.md', 'utf8');
+            // Extract just the results table and winners
+            const tableMatch = report.match(/## Results\n\n([\s\S]*?)\n\n## Winners\n\n([\s\S]*?)\n\n## Key/);
+            const summary = tableMatch
+              ? `## Docker Build Benchmark Results\n\n${tableMatch[1]}\n\n### Winners\n\n${tableMatch[2]}`
+              : '## Docker Build Benchmark\n\nSee full report in artifacts.';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

@@ -1,0 +1,14 @@
+{
+  "variant": "layered",
+  "scenario": "deps",
+  "timestamp": "2026-03-14T19:40:19Z",
+  "runs": [{"build_time_s": 9.384, "image_size_mb": 577.2, "layer_count": 11},{"build_time_s": 1.946, "image_size_mb": 577.2, "layer_count": 11},{"build_time_s": 1.391, "image_size_mb": 577.2, "layer_count": 11}],
+  "median_build_time_s": 1.391,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

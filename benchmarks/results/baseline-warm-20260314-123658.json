@@ -1,0 +1,14 @@
+{
+  "variant": "baseline",
+  "scenario": "warm",
+  "timestamp": "2026-03-14T19:36:58Z",
+  "runs": [{"build_time_s": 7.168, "image_size_mb": 437.8, "layer_count": 10},{"build_time_s": 1.284, "image_size_mb": 437.8, "layer_count": 10},{"build_time_s": 1.255, "image_size_mb": 437.8, "layer_count": 10}],
+  "median_build_time_s": 1.255,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

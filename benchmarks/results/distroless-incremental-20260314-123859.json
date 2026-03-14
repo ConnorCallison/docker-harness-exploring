@@ -1,0 +1,14 @@
+{
+  "variant": "distroless",
+  "scenario": "incremental",
+  "timestamp": "2026-03-14T19:38:59Z",
+  "runs": [{"build_time_s": 13.342, "image_size_mb": 326.2, "layer_count": 19},{"build_time_s": 1.563, "image_size_mb": 326.2, "layer_count": 19},{"build_time_s": 1.448, "image_size_mb": 326.2, "layer_count": 19}],
+  "median_build_time_s": 1.448,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

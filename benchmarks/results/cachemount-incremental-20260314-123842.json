@@ -1,0 +1,14 @@
+{
+  "variant": "cachemount",
+  "scenario": "incremental",
+  "timestamp": "2026-03-14T19:38:42Z",
+  "runs": [{"build_time_s": 11.146, "image_size_mb": 398.1, "layer_count": 10},{"build_time_s": 3.778, "image_size_mb": 398.1, "layer_count": 10},{"build_time_s": 1.580, "image_size_mb": 398.1, "layer_count": 10}],
+  "median_build_time_s": 1.580,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

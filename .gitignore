@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+app/node_modules/
+
+# Build output
+app/build/
+app/.react-router/
+
+# Benchmark results (tracked selectively)
+# benchmarks/results/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+
+# Temp
+/tmp/
+*.log
