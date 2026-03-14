@@ -98,11 +98,15 @@ Nearly every variant shows a ~3-10x slowdown on the first run of a warm/incremen
 
 ### Cross-Run Cache Persistence
 
-| Run | Time | Notes |
-|-----|------|-------|
-| Run 1 | ~29s | Cold (no prior cache) |
-| Run 2 | 29.5s | Cold again — Dockerfile changed between runs, invalidating cache |
-| Run 3 | **pending** | Need to trigger without Dockerfile changes to test true persistence |
+**Result: GHA cache DOES persist across workflow runs.**
+
+The `bench-gha-cache` job (using `docker/build-push-action@v6`) confirmed cross-run persistence on Run 3:
+- Build 1 ("Cold") successfully imported cache from Run 2: `importing cache manifest from gha:2546112929232876310`
+- All dependency and runtime stages hit CACHED — only source COPY + `bun run build` re-ran (because REPORT.md was committed between runs, changing build context)
+
+The `bench-cross-run` job (using raw `docker buildx build`) failed to persist cache because the `type=gha` backend requires `ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN` environment variables that `docker/build-push-action` sets automatically but raw CLI does not.
+
+**Takeaway:** Always use `docker/build-push-action` for GHA cache in CI, not raw `docker buildx build`.
 
 ### CI Key Findings
 
@@ -126,6 +130,23 @@ All backends achieve ~1s warm builds within the same job, proving BuildKit's lay
 
 The 8x slowdown on incremental builds (6s vs 0.7s) suggests GHA runners have significantly slower I/O or BuildKit metadata operations. This makes cache persistence even more important in CI — you want to avoid full rebuilds at all costs.
 
+#### 12. GHA cache persists across workflow runs — but only via `docker/build-push-action`
+
+Run 3 confirmed that `type=gha` cache survives between workflow runs. The `docker/build-push-action` automatically injects `ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN` into the BuildKit builder, enabling cross-run persistence. Raw `docker buildx build --cache-to=type=gha` does NOT work without manually setting these env vars. This is the single most important finding for CI: **use the official action, not raw CLI**.
+
+#### 13. Results are highly consistent across runs
+
+Run 2 vs Run 3 timings (cache backend comparison) are nearly identical:
+
+| Backend | Cold (R2) | Cold (R3) | Warm (R2) | Warm (R3) |
+|---------|-----------|-----------|-----------|-----------|
+| gha | 28.8s | 29.8s | 1.0s | 1.1s |
+| none | 29.3s | 28.9s | 1.0s | 1.0s |
+| inline | 28.3s | 28.8s | 0.9s | 0.9s |
+| local | 35.5s | 35.4s | 4.0s | 4.0s |
+
+Standard deviation across runs is <1s for cold and <0.2s for warm, indicating reliable benchmarks.
+
 ## Recommendations
 
 ### For local development
@@ -144,7 +165,7 @@ Combine the `combined` build stages with `distroless` runtime stage. Expected: ~
 
 1. ~~**combined-distroless hybrid**~~ — **DONE** (295.7 MB, smallest image)
 2. ~~**GHA cache backend**~~ — **DONE** (see CI results above)
-3. **Cross-run GHA cache persistence** — trigger a 3rd workflow run (no Dockerfile changes) to validate `type=gha` cache survives between runs
+3. ~~**Cross-run GHA cache persistence**~~ — **DONE** (confirmed: `type=gha` persists via `docker/build-push-action`)
 4. **Parallel multi-stage** — test if BuildKit parallelizes independent stages
 5. **Bun compile** — test `bun build --compile` for single-binary output (no node_modules in image)
 6. **Layer analysis** — use `docker history` and `dive` to find layer bloat
