@@ -75,6 +75,57 @@ The `layered` variant is largest because it keeps dev dependencies in the final 
 
 Nearly every variant shows a ~3-10x slowdown on the first run of a warm/incremental/deps benchmark. This is Docker's BuildKit warming up its internal caches (metadata, content hashing). The median of runs 2-3 is the representative number.
 
+## GitHub Actions CI Results
+
+> Tested on ubuntu-latest runners, 2026-03-14, workflow run #23095170933
+
+### Cache Backend Comparison (gha-optimized.Dockerfile)
+
+| Cache Backend | Cold | Warm | Incremental | Image Size |
+|---------------|------|------|-------------|------------|
+| **gha** | 28.8s | 1.0s | 5.8s | — |
+| **local** | 35.5s | 4.0s | 6.5s | — |
+| **inline** | 28.3s | 0.9s | 5.9s | — |
+| **none** | 29.3s | 1.0s | 6.1s | — |
+
+### GHA Cache Backend (docker/build-push-action)
+
+| Scenario | Time |
+|----------|------|
+| Cold (populate cache) | ~29s |
+| Warm (from GHA cache) | ~1s |
+| Incremental (one file changed) | ~6s |
+
+### Cross-Run Cache Persistence
+
+| Run | Time | Notes |
+|-----|------|-------|
+| Run 1 | ~29s | Cold (no prior cache) |
+| Run 2 | 29.5s | Cold again — Dockerfile changed between runs, invalidating cache |
+| Run 3 | **pending** | Need to trigger without Dockerfile changes to test true persistence |
+
+### CI Key Findings
+
+#### 7. GHA runners are ~2x slower than local M1 Pro on cold builds
+
+Cold builds on ubuntu-latest (~29s) vs local M1 Pro (~15s). This is expected given the hardware difference (shared GHA runners vs dedicated Apple Silicon).
+
+#### 8. `inline` cache surprisingly matches `gha` on warm builds
+
+The `inline` cache backend (0.9s warm) performed identically to `gha` (1.0s warm) within the same workflow run. However, `inline` cache is embedded in the image layers and won't persist across runs on ephemeral runners unless the image is pushed to a registry. The `gha` backend persists via GitHub's cache service.
+
+#### 9. `local` cache is slowest on GHA
+
+The `local` backend (4.0s warm, 35.5s cold) is the worst performer on ephemeral runners. The local cache directory doesn't persist between workflow runs, and the overhead of writing to it adds ~6s to cold builds vs other backends.
+
+#### 10. Warm builds on GHA show the cache works within a single run
+
+All backends achieve ~1s warm builds within the same job, proving BuildKit's layer caching works. The real question is cross-run persistence — which only `type=gha` and `type=registry` can provide on ephemeral runners.
+
+#### 11. Incremental builds are ~6s on GHA vs ~0.7s locally
+
+The 8x slowdown on incremental builds (6s vs 0.7s) suggests GHA runners have significantly slower I/O or BuildKit metadata operations. This makes cache persistence even more important in CI — you want to avoid full rebuilds at all costs.
+
 ## Recommendations
 
 ### For local development
@@ -84,18 +135,20 @@ Use `combined.Dockerfile`. Sub-second rebuilds on source changes.
 Use `combined.Dockerfile` with `--cache-to=type=local,dest=/tmp/docker-cache` and `--cache-from=type=local,src=/tmp/docker-cache`. Should achieve ~1-2s builds after the first run.
 
 ### For CI with ephemeral runners (GitHub Actions)
-Use `combined.Dockerfile` with `--cache-to=type=gha` and `--cache-from=type=gha` (GitHub Actions cache backend). Cold builds will be ~15s, but subsequent workflow runs will hit cache.
+Use `gha-optimized.Dockerfile` with `--cache-to=type=gha,mode=max` and `--cache-from=type=gha`. Cold builds are ~29s on ubuntu-latest, warm builds drop to ~1s within the same run. Cross-run cache persistence (the key advantage of `type=gha`) needs further validation — see pending Run 3 in cross-run test above. Avoid `type=local` on ephemeral runners (adds overhead, doesn't persist).
 
 ### For smallest production image
 Combine the `combined` build stages with `distroless` runtime stage. Expected: ~300 MB image with sub-second rebuilds.
 
 ## Next Iterations
 
-1. **combined-distroless hybrid** — combine best build speed with smallest runtime
-2. **GHA cache backend** — test `--cache-to=type=gha` on actual GitHub Actions runners
-3. **Parallel multi-stage** — test if BuildKit parallelizes independent stages
-4. **Bun compile** — test `bun build --compile` for single-binary output (no node_modules in image)
-5. **Layer analysis** — use `docker history` and `dive` to find layer bloat
+1. ~~**combined-distroless hybrid**~~ — **DONE** (295.7 MB, smallest image)
+2. ~~**GHA cache backend**~~ — **DONE** (see CI results above)
+3. **Cross-run GHA cache persistence** — trigger a 3rd workflow run (no Dockerfile changes) to validate `type=gha` cache survives between runs
+4. **Parallel multi-stage** — test if BuildKit parallelizes independent stages
+5. **Bun compile** — test `bun build --compile` for single-binary output (no node_modules in image)
+6. **Layer analysis** — use `docker history` and `dive` to find layer bloat
+7. **Larger runner classes** — benchmark on `ubuntu-latest-4-cores` or `ubuntu-latest-8-cores` to see if GHA cold builds improve with more CPU
 
 
 ## Per-Variant Details

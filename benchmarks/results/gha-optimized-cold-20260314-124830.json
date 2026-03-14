@@ -1,0 +1,14 @@
+{
+  "variant": "gha-optimized",
+  "scenario": "cold",
+  "timestamp": "2026-03-14T19:48:30Z",
+  "runs": [{"build_time_s": 17.175, "image_size_mb": 367.6, "layer_count": 10}],
+  "median_build_time_s": 17.175,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}
