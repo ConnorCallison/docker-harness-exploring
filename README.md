@@ -2,6 +2,23 @@
 
 An autoresearch-style benchmark lab for finding the fastest Docker build configuration for a large Bun + React Router v7 web application. Built using iterative experimentation: hypothesize → implement → benchmark → record → analyze → repeat.
 
+```mermaid
+graph LR
+    H["🔬 Hypothesize"] --> I["🔨 Implement"]
+    I --> B["📊 Benchmark"]
+    B --> R["💾 Record"]
+    R --> A["📈 Analyze"]
+    A --> D["🧭 Decide"]
+    D --> H
+
+    style H fill:#4f46e5,color:#fff,stroke:#4338ca
+    style I fill:#7c3aed,color:#fff,stroke:#6d28d9
+    style B fill:#2563eb,color:#fff,stroke:#1d4ed8
+    style R fill:#0891b2,color:#fff,stroke:#0e7490
+    style A fill:#059669,color:#fff,stroke:#047857
+    style D fill:#d97706,color:#fff,stroke:#b45309
+```
+
 ## The Question
 
 > What is the fastest, most cache-efficient way to Dockerize a large JavaScript application for both local development and CI/CD (GitHub Actions)?
@@ -42,6 +59,39 @@ An autoresearch-style benchmark lab for finding the fastest Docker build configu
 
 **Cross-run cache persistence: ✅ Confirmed** — `type=gha` cache survives across workflow runs, but **only** when using `docker/build-push-action` (not raw `docker buildx build`).
 
+### Build Time Comparison
+
+```mermaid
+---
+config:
+    xyChart:
+        width: 800
+        height: 400
+---
+xychart-beta
+    title "Cold vs Warm Build Times (seconds, local)"
+    x-axis ["baseline", "combined", "bun-compile", "test-target", "parallel"]
+    y-axis "Seconds" 0 --> 45
+    bar [16.4, 22.3, 18.9, 19.8, 41.2]
+    bar [2.3, 0.5, 0.5, 0.5, 0.5]
+```
+
+### Image Size Comparison
+
+```mermaid
+---
+config:
+    xyChart:
+        width: 700
+        height: 350
+---
+xychart-beta
+    title "Docker Image Size (MB)"
+    x-axis ["bun-compile", "combined-distroless", "combined", "baseline"]
+    y-axis "Size (MB)" 0 --> 550
+    bar [193, 358, 430, 505]
+```
+
 ---
 
 ## Key Findings
@@ -68,6 +118,22 @@ This was counterintuitive. The `multistage` variant (23.1s cold) was slower than
 
 If your test stage isn't referenced by the final stage (directly or transitively), **BuildKit will never run it**. Our `combined.Dockerfile` had a test stage that was completely dead code:
 
+```mermaid
+graph TD
+    subgraph "❌ Dead test stage (combined.Dockerfile)"
+        D1[deps] --> B1[build]
+        D1 --> T1[test]
+        B1 --> R1[runtime]
+        T1 -.->|"never reached"| X1["🚫 SKIPPED"]
+    end
+
+    style T1 fill:#fca5a5,stroke:#dc2626,stroke-dasharray: 5 5
+    style X1 fill:#fee2e2,stroke:#dc2626,stroke-dasharray: 5 5
+    style R1 fill:#86efac,stroke:#16a34a
+    style D1 fill:#93c5fd,stroke:#2563eb
+    style B1 fill:#93c5fd,stroke:#2563eb
+```
+
 ```dockerfile
 FROM bun:1 AS test     # ← BuildKit skips this entirely
 RUN bun run test       #   because "runtime" doesn't COPY --from=test
@@ -77,6 +143,22 @@ COPY --from=build ...  # ← Only "build" and "deps" are reachable
 ```
 
 **Solution:** The `parallel.Dockerfile` forces a dependency edge:
+
+```mermaid
+graph TD
+    subgraph "✅ Forced test gate (parallel.Dockerfile)"
+        D2[deps] --> B2[build]
+        D2 --> T2[test]
+        B2 --> R2[runtime]
+        T2 -->|"COPY --from=test"| R2
+    end
+
+    style T2 fill:#86efac,stroke:#16a34a
+    style R2 fill:#86efac,stroke:#16a34a
+    style D2 fill:#93c5fd,stroke:#2563eb
+    style B2 fill:#93c5fd,stroke:#2563eb
+```
+
 ```dockerfile
 FROM bun:1-slim AS runtime
 COPY --from=build /app/build ./build
@@ -86,6 +168,25 @@ COPY --from=test /app/package.json /tmp/test-passed  # Forces test to run
 ### Finding 4: BuildKit parallelizes independent stages automatically
 
 When both `build` and `test` stages depend on `deps` (but not on each other), BuildKit runs them concurrently. The `parallel` variant proves this:
+
+```mermaid
+gantt
+    title BuildKit Parallel Stage Execution
+    dateFormat X
+    axisFormat %ss
+
+    section Sequential (hypothetical)
+    deps            :a1, 0, 5
+    build           :a2, after a1, 15
+    test            :a3, after a2, 20
+    runtime         :a4, after a3, 1
+
+    section Parallel (actual)
+    deps            :b1, 0, 5
+    build           :b2, after b1, 15
+    test            :b3, after b1, 20
+    runtime         :b4, after b2 b3, 1
+```
 
 - **deps** stage: ~5s
 - **build** stage: ~15s (after deps)
@@ -107,6 +208,33 @@ The `bun-compile` variant packages the entire server into a **99MB single binary
 
 The key trade-off: `bun build --compile` doesn't support all Node.js APIs (notably some dynamic `require` patterns), and React Router v7's full SSR stack required a custom entry point. But for servers where it works, the size reduction is massive.
 
+```mermaid
+graph LR
+    subgraph "baseline — 505 MB"
+        A1["Bun Runtime<br/>180 MB"] ~~~ A2["node_modules<br/>247 MB"] ~~~ A3["Source + Build<br/>40 MB"] ~~~ A4["OS Layer<br/>38 MB"]
+    end
+
+    subgraph "combined — 430 MB"
+        B1["Bun Slim<br/>101 MB"] ~~~ B2["node_modules<br/>246 MB"] ~~~ B3["Build Output<br/>3 MB"] ~~~ B4["OS Layer<br/>80 MB"]
+    end
+
+    subgraph "bun-compile — 193 MB"
+        C1["Compiled Binary<br/>99 MB"] ~~~ C2["Static Assets<br/>1.3 MB"] ~~~ C3["OS Layer<br/>93 MB"]
+    end
+
+    style A1 fill:#ef4444,color:#fff
+    style A2 fill:#f97316,color:#fff
+    style A3 fill:#eab308,color:#000
+    style A4 fill:#6b7280,color:#fff
+    style B1 fill:#3b82f6,color:#fff
+    style B2 fill:#f97316,color:#fff
+    style B3 fill:#22c55e,color:#fff
+    style B4 fill:#6b7280,color:#fff
+    style C1 fill:#8b5cf6,color:#fff
+    style C2 fill:#22c55e,color:#fff
+    style C3 fill:#6b7280,color:#fff
+```
+
 ### Finding 6: GHA cache persistence requires `docker/build-push-action`
 
 Raw `docker buildx build --cache-to=type=gha` does **not work** on GitHub Actions ephemeral runners because `type=gha` requires `ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN` environment variables. The `docker/build-push-action@v6` sets these automatically. Without the action, your cache silently doesn't persist.
@@ -126,9 +254,38 @@ Raw `docker buildx build --cache-to=type=gha` does **not work** on GitHub Action
 
 The `local` backend added 10s to cold builds (57.9s vs 47.2s) and 5x to warm builds (6.3s vs 1.2s) compared to `type=gha`. The I/O overhead of writing cache to disk on ephemeral runners negates any caching benefit.
 
+```mermaid
+---
+config:
+    xyChart:
+        width: 700
+        height: 300
+---
+xychart-beta
+    title "GHA Cache Backend: Warm Build Time (seconds)"
+    x-axis ["type=gha", "type=inline", "none", "type=local"]
+    y-axis "Seconds" 0 --> 7
+    bar [1.2, 1.2, 1.1, 6.3]
+```
+
 ### Finding 8: GHA runners are ~2.5x slower than local Apple Silicon
 
 Cold builds on `ubuntu-latest` (47s) vs local M1 Pro (19s). This is expected — GHA's `ubuntu-latest` provides 2 vCPUs and 7GB RAM on shared hardware vs dedicated Apple Silicon. Incremental builds show an even larger gap: 14s on GHA vs 0.5s locally (28x).
+
+```mermaid
+---
+config:
+    xyChart:
+        width: 600
+        height: 300
+---
+xychart-beta
+    title "Local (M1 Pro) vs CI (ubuntu-latest) — seconds"
+    x-axis ["Cold", "Warm", "Incremental"]
+    y-axis "Seconds" 0 --> 50
+    bar [19, 0.5, 0.5]
+    bar [47, 1.2, 14]
+```
 
 ### Finding 9: Incremental builds are the real CI bottleneck
 
@@ -267,6 +424,30 @@ BuildKit's dependency graph sees that `build` and `test` are independent and run
 
 ## Recommendations
 
+### Recommended CI Pipeline
+
+```mermaid
+graph LR
+    subgraph "PR Checks (fast)"
+        PR[Push to PR] --> T["docker build<br/>--target test<br/>⏱️ ~28s cold"]
+    end
+
+    subgraph "Merge to Main (deploy)"
+        M[Merge] --> B["docker build<br/>--cache-from type=gha<br/>⏱️ ~1s warm"]
+        B --> P["docker push<br/>to registry"]
+        P --> D["Deploy"]
+    end
+
+    T -.->|"passes"| M
+
+    style PR fill:#f59e0b,color:#000,stroke:#d97706
+    style T fill:#3b82f6,color:#fff,stroke:#2563eb
+    style M fill:#10b981,color:#fff,stroke:#059669
+    style B fill:#3b82f6,color:#fff,stroke:#2563eb
+    style P fill:#8b5cf6,color:#fff,stroke:#7c3aed
+    style D fill:#10b981,color:#fff,stroke:#059669
+```
+
 ### For Local Development
 **Use `combined.Dockerfile`.**
 - 0.5s warm rebuilds, 0.5s incremental
@@ -322,12 +503,24 @@ BuildKit's dependency graph sees that `build` and `test` are independent and run
 
 If you only do one thing, do the one at the top:
 
-1. **`COPY --link`** — 4.6x improvement on cached builds. Zero effort, zero risk.
-2. **Multi-stage deps/build/runtime** — Isolates dependency install from source build. Change source → skip `bun install`.
-3. **`--mount=type=cache`** — Persists bun's install cache and Vite's transform cache across builds.
-4. **Fine-grained `COPY` ordering** — Copy config files before source files. Config changes less often.
-5. **`type=gha` cache in CI** — Cross-run persistence on ephemeral runners. Only works via `docker/build-push-action`.
-6. **`bun build --compile`** — Nuclear option for image size. 99MB binary replaces Bun runtime + node_modules.
+```mermaid
+graph TD
+    L1["1. COPY --link<br/><i>4.6x faster cached builds</i><br/>Zero effort, zero risk"]
+    L2["2. Multi-stage builds<br/><i>deps → build → runtime</i><br/>Change source → skip bun install"]
+    L3["3. --mount=type=cache<br/><i>Persistent bun + Vite cache</i><br/>Across builds"]
+    L4["4. Fine-grained COPY ordering<br/><i>Config before source</i><br/>Config changes less often"]
+    L5["5. type=gha cache in CI<br/><i>Cross-run persistence</i><br/>Only via docker/build-push-action"]
+    L6["6. bun build --compile<br/><i>99MB binary, 193MB image</i><br/>No runtime, no node_modules"]
+
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6
+
+    style L1 fill:#16a34a,color:#fff,stroke:#15803d
+    style L2 fill:#2563eb,color:#fff,stroke:#1d4ed8
+    style L3 fill:#7c3aed,color:#fff,stroke:#6d28d9
+    style L4 fill:#0891b2,color:#fff,stroke:#0e7490
+    style L5 fill:#d97706,color:#fff,stroke:#b45309
+    style L6 fill:#dc2626,color:#fff,stroke:#b91c1c
+```
 
 ---
 
@@ -376,13 +569,42 @@ bun run analysis/analyze.ts
 
 This project follows an **autoresearch** methodology (inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch)):
 
-1. **Hypothesize** — Form a prediction (e.g., "COPY --link will improve cached builds by 2x")
-2. **Implement** — Create a Dockerfile variant in `benchmarks/dockerfiles/`
-3. **Benchmark** — Run `./bench.sh <variant> --all-scenarios`
-4. **Record** — Results auto-saved as JSON
-5. **Analyze** — `bun run analysis/analyze.ts` generates comparison tables
-6. **Decide** — Update `program.md` with findings, plan next iteration
-7. **Repeat**
+```mermaid
+graph TD
+    subgraph "Iteration Loop"
+        H["🔬 Hypothesize<br/><i>e.g. COPY --link will<br/>improve cached builds 2x</i>"]
+        I["🔨 Implement<br/><i>Create Dockerfile variant in<br/>benchmarks/dockerfiles/</i>"]
+        B["📊 Benchmark<br/><i>./bench.sh variant<br/>--all-scenarios --runs 3</i>"]
+        R["💾 Record<br/><i>JSON results auto-saved to<br/>benchmarks/results/</i>"]
+        A["📈 Analyze<br/><i>bun run analysis/analyze.ts<br/>generates comparison tables</i>"]
+        D["🧭 Decide<br/><i>Update program.md<br/>plan next iteration</i>"]
+
+        H --> I --> B --> R --> A --> D --> H
+    end
+
+    subgraph "Completed Iterations"
+        V1["baseline vs layered"]
+        V2["+ multistage, cachemount"]
+        V3["+ COPY --link (combined)"]
+        V4["+ distroless runtime"]
+        V5["+ GHA cache backends"]
+        V6["+ parallel, bun-compile"]
+        V1 --> V2 --> V3 --> V4 --> V5 --> V6
+    end
+
+    style H fill:#4f46e5,color:#fff
+    style I fill:#7c3aed,color:#fff
+    style B fill:#2563eb,color:#fff
+    style R fill:#0891b2,color:#fff
+    style A fill:#059669,color:#fff
+    style D fill:#d97706,color:#fff
+    style V1 fill:#e5e7eb,color:#000
+    style V2 fill:#e5e7eb,color:#000
+    style V3 fill:#e5e7eb,color:#000
+    style V4 fill:#e5e7eb,color:#000
+    style V5 fill:#e5e7eb,color:#000
+    style V6 fill:#86efac,color:#000
+```
 
 See [`program.md`](program.md) for the full research program and [`SPEC.md`](SPEC.md) for the project specification.
 
