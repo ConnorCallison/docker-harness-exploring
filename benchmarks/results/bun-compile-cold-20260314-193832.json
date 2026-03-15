@@ -1,0 +1,14 @@
+{
+  "variant": "bun-compile",
+  "scenario": "cold",
+  "timestamp": "2026-03-15T02:38:32Z",
+  "runs": [{"build_time_s": 20.409, "image_size_mb": 192.5, "layer_count": 4},{"build_time_s": 18.918, "image_size_mb": 192.5, "layer_count": 4},{"build_time_s": 18.912, "image_size_mb": 192.5, "layer_count": 4}],
+  "median_build_time_s": 18.912,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

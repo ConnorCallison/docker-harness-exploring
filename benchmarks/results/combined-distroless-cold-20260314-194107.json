@@ -1,0 +1,14 @@
+{
+  "variant": "combined-distroless",
+  "scenario": "cold",
+  "timestamp": "2026-03-15T02:41:07Z",
+  "runs": [{"build_time_s": 24.524, "image_size_mb": 358.3, "layer_count": 19}],
+  "median_build_time_s": 24.524,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

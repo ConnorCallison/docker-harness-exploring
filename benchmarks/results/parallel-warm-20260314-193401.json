@@ -1,0 +1,14 @@
+{
+  "variant": "parallel",
+  "scenario": "warm",
+  "timestamp": "2026-03-15T02:34:01Z",
+  "runs": [{"build_time_s": 28.627, "image_size_mb": 430.1, "layer_count": 11},{"build_time_s": 0.982, "image_size_mb": 430.1, "layer_count": 11},{"build_time_s": 0.475, "image_size_mb": 430.1, "layer_count": 11}],
+  "median_build_time_s": 0.475,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

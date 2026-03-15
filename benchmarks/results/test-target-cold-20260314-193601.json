@@ -1,0 +1,14 @@
+{
+  "variant": "test-target",
+  "scenario": "cold",
+  "timestamp": "2026-03-15T02:36:01Z",
+  "runs": [{"build_time_s": 19.823, "image_size_mb": 430.1, "layer_count": 10},{"build_time_s": 29.485, "image_size_mb": 430.1, "layer_count": 10},{"build_time_s": 30.174, "image_size_mb": 430.1, "layer_count": 10}],
+  "median_build_time_s": 19.823,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "docker_version": "27.4.0",
+    "cpu": "Apple M1 Pro",
+    "ram_gb": 32
+  }
+}

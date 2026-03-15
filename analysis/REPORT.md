@@ -1,7 +1,7 @@
 # Docker Build Benchmark Report
 
-> Generated: 2026-03-14T19:40:44.950Z
-> Results: 22 benchmark runs
+> Generated: 2026-03-15T02:43:05.255Z
+> Results: 44 benchmark runs
 
 ## Environment
 
@@ -17,159 +17,38 @@
 
 | Variant | cold | warm | incremental | deps | Image Size | Layers |
 |---------|----------|----------|----------|----------|------------|--------|
-| **baseline** | 9.4s (1.0x) | 1.3s | 1.5s | 1.5s | 437.8 MB | 10 |
-| **cachemount** | 20.0s (0.5x) | 1.8s | 3.8s | 1.3s | 398.1 MB | 10 |
-| **combined** | 14.8s (0.6x) | 0.5s | 0.7s | 0.7s | 367.6 MB | 10 |
-| **distroless** | 17.9s (0.5x) | 1.5s | 1.6s | 1.4s | 326.2 MB | 19 |
-| **layered** | 17.8s (0.5x) | 1.5s | 1.6s | 1.9s | 577.2 MB | 11 |
-| **multistage** | 23.1s (0.4x) | — | — | — | 398.1 MB | 10 |
-| **registry** | 21.3s (0.4x) | — | — | — | 398.1 MB | 10 |
+| **baseline** | 17.5s (0.9x) | 3.0s | 2.4s | 1.5s | 437.8 MB | 10 |
+| **bun-compile** | 18.9s (0.9x) | 0.5s | 0.8s | — | 192.5 MB | 4 |
+| **cachemount** | 20.0s (0.8x) | 1.8s | 3.8s | 1.3s | 398.1 MB | 10 |
+| **combined** | 25.8s (0.6x) | 0.8s | 27.5s | 0.7s | 430.1 MB | 10 |
+| **combined-distroless** | 24.5s (0.7x) | — | — | — | 358.3 MB | 19 |
+| **distroless** | 17.9s (0.9x) | 1.5s | 1.6s | 1.4s | 326.2 MB | 19 |
+| **gha-optimized** | 17.2s (1.0x) | — | — | — | 367.6 MB | 10 |
+| **layered** | 17.8s (0.9x) | 1.5s | 1.6s | 1.9s | 577.2 MB | 11 |
+| **multistage** | 23.1s (0.7x) | — | — | — | 398.1 MB | 10 |
+| **parallel** | 41.2s (0.4x) | 1.0s | 0.8s | — | 430.1 MB | 11 |
+| **registry** | 21.3s (0.8x) | — | — | — | 398.1 MB | 10 |
+| **test-target** | 29.5s (0.6x) | 0.5s | — | — | 430.1 MB | 10 |
 
 
 ## Winners
 
 | Scenario | Best Variant | Time |
 |----------|-------------|------|
-| cold | **baseline** | 9.3s |
-| warm | **combined** | 0.5s |
-| incremental | **combined** | 0.6s |
+| cold | **layered** | 14.6s |
+| warm | **parallel** | 0.5s |
+| incremental | **bun-compile** | 0.5s |
 | deps | **combined** | 0.6s |
 
 ## Key Findings
 
-Based on 22 benchmark runs across 7 variants on Apple M1 Pro / Docker 27.4:
 
-### 1. `combined` is the best all-rounder
+Based on 44 benchmark runs across 12 variants:
 
-The `combined` variant (multi-stage + `COPY --link` + cache mounts + fine-grained layer splitting) wins every cached scenario by 2-3x:
-
-- **Warm**: 0.5s vs next-best 1.3s (baseline) — **2.6x faster**
-- **Incremental**: 0.7s vs next-best 1.5s (baseline) — **2.1x faster**
-- **Deps changed**: 0.7s vs next-best 1.3s (cachemount) — **1.9x faster**
-
-### 2. `COPY --link` is the highest-leverage single technique
-
-The key differentiator between `combined` and other multi-stage variants (`multistage`, `cachemount`) is `COPY --link`. Without it, multi-stage builds are actually *slower* than baseline because the inter-stage COPY invalidates downstream layers. With `--link`, each COPY creates an independent layer that can be reused even when upstream stages change.
-
-### 3. Cold builds favor simplicity
-
-For cold builds (no cache at all), the naive `baseline` (9.4s) beats everything because it has zero inter-stage overhead. The `combined` penalty is ~5s (14.8s), which is acceptable given the 2-3x gains on subsequent builds.
-
-### 4. Image size ladder
-
-| Variant | Size | vs Baseline |
-|---------|------|-------------|
-| distroless | 326 MB | -25% |
-| combined | 368 MB | -16% |
-| cachemount / multistage | 398 MB | -9% |
-| baseline | 438 MB | — |
-| layered | 577 MB | +32% |
-
-The `layered` variant is largest because it keeps dev dependencies in the final image (single-stage, no pruning).
-
-### 5. Cache mounts help deps, not incremental
-
-`--mount=type=cache` for bun's install cache helps on dependency updates (1.3s for cachemount vs 1.9s for layered) but doesn't help incremental source changes. The cache mount's value is primarily in CI with persistent runners where the bun cache directory survives between builds.
-
-### 6. Variance is high on run 1
-
-Nearly every variant shows a ~3-10x slowdown on the first run of a warm/incremental/deps benchmark. This is Docker's BuildKit warming up its internal caches (metadata, content hashing). The median of runs 2-3 is the representative number.
-
-## GitHub Actions CI Results
-
-> Tested on ubuntu-latest runners, 2026-03-14, workflow run #23095170933
-
-### Cache Backend Comparison (gha-optimized.Dockerfile)
-
-| Cache Backend | Cold | Warm | Incremental | Image Size |
-|---------------|------|------|-------------|------------|
-| **gha** | 28.8s | 1.0s | 5.8s | — |
-| **local** | 35.5s | 4.0s | 6.5s | — |
-| **inline** | 28.3s | 0.9s | 5.9s | — |
-| **none** | 29.3s | 1.0s | 6.1s | — |
-
-### GHA Cache Backend (docker/build-push-action)
-
-| Scenario | Time |
-|----------|------|
-| Cold (populate cache) | ~29s |
-| Warm (from GHA cache) | ~1s |
-| Incremental (one file changed) | ~6s |
-
-### Cross-Run Cache Persistence
-
-**Result: GHA cache DOES persist across workflow runs.**
-
-The `bench-gha-cache` job (using `docker/build-push-action@v6`) confirmed cross-run persistence on Run 3:
-- Build 1 ("Cold") successfully imported cache from Run 2: `importing cache manifest from gha:2546112929232876310`
-- All dependency and runtime stages hit CACHED — only source COPY + `bun run build` re-ran (because REPORT.md was committed between runs, changing build context)
-
-The `bench-cross-run` job (using raw `docker buildx build`) failed to persist cache because the `type=gha` backend requires `ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN` environment variables that `docker/build-push-action` sets automatically but raw CLI does not.
-
-**Takeaway:** Always use `docker/build-push-action` for GHA cache in CI, not raw `docker buildx build`.
-
-### CI Key Findings
-
-#### 7. GHA runners are ~2x slower than local M1 Pro on cold builds
-
-Cold builds on ubuntu-latest (~29s) vs local M1 Pro (~15s). This is expected given the hardware difference (shared GHA runners vs dedicated Apple Silicon).
-
-#### 8. `inline` cache surprisingly matches `gha` on warm builds
-
-The `inline` cache backend (0.9s warm) performed identically to `gha` (1.0s warm) within the same workflow run. However, `inline` cache is embedded in the image layers and won't persist across runs on ephemeral runners unless the image is pushed to a registry. The `gha` backend persists via GitHub's cache service.
-
-#### 9. `local` cache is slowest on GHA
-
-The `local` backend (4.0s warm, 35.5s cold) is the worst performer on ephemeral runners. The local cache directory doesn't persist between workflow runs, and the overhead of writing to it adds ~6s to cold builds vs other backends.
-
-#### 10. Warm builds on GHA show the cache works within a single run
-
-All backends achieve ~1s warm builds within the same job, proving BuildKit's layer caching works. The real question is cross-run persistence — which only `type=gha` and `type=registry` can provide on ephemeral runners.
-
-#### 11. Incremental builds are ~6s on GHA vs ~0.7s locally
-
-The 8x slowdown on incremental builds (6s vs 0.7s) suggests GHA runners have significantly slower I/O or BuildKit metadata operations. This makes cache persistence even more important in CI — you want to avoid full rebuilds at all costs.
-
-#### 12. GHA cache persists across workflow runs — but only via `docker/build-push-action`
-
-Run 3 confirmed that `type=gha` cache survives between workflow runs. The `docker/build-push-action` automatically injects `ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN` into the BuildKit builder, enabling cross-run persistence. Raw `docker buildx build --cache-to=type=gha` does NOT work without manually setting these env vars. This is the single most important finding for CI: **use the official action, not raw CLI**.
-
-#### 13. Results are highly consistent across runs
-
-Run 2 vs Run 3 timings (cache backend comparison) are nearly identical:
-
-| Backend | Cold (R2) | Cold (R3) | Warm (R2) | Warm (R3) |
-|---------|-----------|-----------|-----------|-----------|
-| gha | 28.8s | 29.8s | 1.0s | 1.1s |
-| none | 29.3s | 28.9s | 1.0s | 1.0s |
-| inline | 28.3s | 28.8s | 0.9s | 0.9s |
-| local | 35.5s | 35.4s | 4.0s | 4.0s |
-
-Standard deviation across runs is <1s for cold and <0.2s for warm, indicating reliable benchmarks.
-
-## Recommendations
-
-### For local development
-Use `combined.Dockerfile`. Sub-second rebuilds on source changes.
-
-### For CI with persistent cache (self-hosted runners)
-Use `combined.Dockerfile` with `--cache-to=type=local,dest=/tmp/docker-cache` and `--cache-from=type=local,src=/tmp/docker-cache`. Should achieve ~1-2s builds after the first run.
-
-### For CI with ephemeral runners (GitHub Actions)
-Use `gha-optimized.Dockerfile` with `--cache-to=type=gha,mode=max` and `--cache-from=type=gha`. Cold builds are ~29s on ubuntu-latest, warm builds drop to ~1s within the same run. Cross-run cache persistence (the key advantage of `type=gha`) needs further validation — see pending Run 3 in cross-run test above. Avoid `type=local` on ephemeral runners (adds overhead, doesn't persist).
-
-### For smallest production image
-Combine the `combined` build stages with `distroless` runtime stage. Expected: ~300 MB image with sub-second rebuilds.
-
-## Next Iterations
-
-1. ~~**combined-distroless hybrid**~~ — **DONE** (295.7 MB, smallest image)
-2. ~~**GHA cache backend**~~ — **DONE** (see CI results above)
-3. ~~**Cross-run GHA cache persistence**~~ — **DONE** (confirmed: `type=gha` persists via `docker/build-push-action`)
-4. **Parallel multi-stage** — test if BuildKit parallelizes independent stages
-5. **Bun compile** — test `bun build --compile` for single-binary output (no node_modules in image)
-6. **Layer analysis** — use `docker history` and `dive` to find layer bloat
-7. **Larger runner classes** — benchmark on `ubuntu-latest-4-cores` or `ubuntu-latest-8-cores` to see if GHA cold builds improve with more CPU
+1. **Cold builds**: layered was fastest at 14.6s
+2. **Warm builds**: parallel at 0.5s
+3. **Incremental**: bun-compile at 0.5s
+4. **Dep updates**: combined at 0.6s
 
 
 ## Per-Variant Details
@@ -177,16 +56,28 @@ Combine the `combined` build stages with `distroless` runtime stage. Expected: ~
 ### baseline
 
 - **deps**: median=1.5s, mean=4.1s, min=1.3s, max=9.4s, stddev=3.76s (3 runs)
-- **cold**: median=9.4s, mean=9.6s, min=9.3s, max=10.0s, stddev=0.34s (3 runs)
-- **warm**: median=1.3s, mean=3.2s, min=1.3s, max=7.2s, stddev=2.78s (3 runs)
-- **incremental**: median=1.5s, mean=3.8s, min=1.4s, max=8.4s, stddev=3.27s (3 runs)
+- **warm**: median=3.0s, mean=2.8s, min=2.3s, max=3.2s, stddev=0.40s (3 runs)
+- **cold**: median=17.5s, mean=20.7s, min=16.4s, max=28.2s, stddev=5.32s (3 runs)
+- **incremental**: median=2.4s, mean=10.5s, min=2.4s, max=26.6s, stddev=11.39s (3 runs)
+
+### parallel
+
+- **incremental**: median=0.8s, mean=10.3s, min=0.7s, max=29.4s, stddev=13.53s (3 runs)
+- **cold**: median=41.2s, mean=41.4s, min=39.2s, max=43.7s, stddev=1.83s (3 runs)
+- **warm**: median=1.0s, mean=10.0s, min=0.5s, max=28.6s, stddev=13.15s (3 runs)
+
+### bun-compile
+
+- **incremental**: median=0.8s, mean=3.6s, min=0.5s, max=9.6s, stddev=4.23s (3 runs)
+- **cold**: median=18.9s, mean=19.4s, min=18.9s, max=20.4s, stddev=0.70s (3 runs)
+- **warm**: median=0.5s, mean=0.5s, min=0.5s, max=0.6s, stddev=0.03s (3 runs)
 
 ### combined
 
-- **warm**: median=0.5s, mean=3.4s, min=0.5s, max=9.3s, stddev=4.13s (3 runs)
+- **warm**: median=0.8s, mean=0.8s, min=0.8s, max=0.8s, stddev=0.00s (1 runs)
+- **cold**: median=25.8s, mean=25.1s, min=22.3s, max=27.3s, stddev=2.10s (3 runs)
 - **deps**: median=0.7s, mean=2.4s, min=0.6s, max=5.8s, stddev=2.41s (3 runs)
-- **incremental**: median=0.7s, mean=1.7s, min=0.6s, max=3.8s, stddev=1.49s (3 runs)
-- **cold**: median=14.8s, mean=14.7s, min=13.4s, max=15.9s, stddev=1.01s (3 runs)
+- **incremental**: median=27.5s, mean=27.5s, min=27.5s, max=27.5s, stddev=0.00s (1 runs)
 
 ### layered
 
@@ -209,9 +100,22 @@ Combine the `combined` build stages with `distroless` runtime stage. Expected: ~
 - **warm**: median=1.5s, mean=1.7s, min=1.4s, max=2.0s, stddev=0.26s (3 runs)
 - **deps**: median=1.4s, mean=1.4s, min=1.3s, max=1.6s, stddev=0.09s (3 runs)
 
+### combined-distroless
+
+- **cold**: median=24.5s, mean=24.5s, min=24.5s, max=24.5s, stddev=0.00s (1 runs)
+
+### test-target
+
+- **cold**: median=29.5s, mean=26.5s, min=19.8s, max=30.2s, stddev=4.73s (3 runs)
+- **warm**: median=0.5s, mean=0.5s, min=0.5s, max=0.6s, stddev=0.04s (3 runs)
+
 ### registry
 
 - **cold**: median=21.3s, mean=21.2s, min=21.0s, max=21.3s, stddev=0.12s (3 runs)
+
+### gha-optimized
+
+- **cold**: median=17.2s, mean=17.2s, min=17.2s, max=17.2s, stddev=0.00s (1 runs)
 
 ### multistage
 
